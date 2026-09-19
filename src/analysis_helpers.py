@@ -390,3 +390,37 @@ def cluster_bootstrap_ci(df, participant_col, statistic_fn, n_boot=2000,
 
     lo, hi = np.percentile(stats, [100 * alpha / 2, 100 * (1 - alpha / 2)])
     return float(np.mean(stats)), float(lo), float(hi)
+
+# --------------------------------------------------------------------------
+# 7. Structural choice model
+# --------------------------------------------------------------------------
+
+def structural_choice_probability(params, probability, certain_amount, risky_outcome):
+    """Return P(choose the risky option) for the structural model."""
+    alpha, lam, gamma, beta = params
+    risky_value = prob_weight(probability, gamma) * value_fn(risky_outcome, alpha, lam)
+    certain_value = value_fn(certain_amount, alpha, lam)
+    diff = beta * (risky_value - certain_value)
+    return 1.0 / (1.0 + np.exp(-diff))
+
+
+def fit_structural_model(df, x0=(0.8, 1.8, 0.75, 0.25)):
+    """Fit the structural model by maximum likelihood."""
+    from scipy.optimize import minimize
+
+    y = df["gambled"].to_numpy(dtype=float)
+    p = df["probability"].to_numpy(dtype=float)
+    certain = df["certain_amount"].to_numpy(dtype=float)
+    risky = df["risky_outcome"].to_numpy(dtype=float)
+
+    def nll(params):
+        prob = structural_choice_probability(params, p, certain, risky)
+        prob = np.clip(prob, 1e-10, 1 - 1e-10)
+        return -np.sum(y * np.log(prob) + (1 - y) * np.log(1 - prob))
+
+    bounds = [(0.05, 2.0), (0.2, 5.0), (0.2, 2.0), (0.001, 5.0)]
+    result = minimize(nll, x0=x0, bounds=bounds, method="L-BFGS-B")
+    result.nll = float(result.fun)
+    result.aic = 2 * len(result.x) + 2 * result.fun
+    result.bic = len(result.x) * np.log(len(df)) + 2 * result.fun
+    return result
